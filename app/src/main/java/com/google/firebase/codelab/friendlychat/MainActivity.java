@@ -21,6 +21,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
@@ -290,6 +291,11 @@ public class MainActivity extends AppCompatActivity
             @Override
             public void onClick(View view) {
                 // Send messages on click.
+                FriendlyMessage friendlyMessage = new FriendlyMessage(mMessageEditText.getText().toString(),
+                        mUsername, mPhotoUrl, null);
+                mFirebaseDatabaseReference.child(MESSAGES_CHILD)
+                        .push().setValue(friendlyMessage);
+                mMessageEditText.setText("");
             }
         });
 
@@ -298,8 +304,76 @@ public class MainActivity extends AppCompatActivity
             @Override
             public void onClick(View view) {
                 // Select image for image message on click.
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("image/*");
+                startActivityForResult(intent, REQUEST_IMAGE);
             }
         });
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        Log.d(TAG, "onActivityResult: requestCode=" + requestCode + ", resultCode=" + resultCode);
+
+        if (requestCode== REQUEST_IMAGE){
+            if (resultCode== RESULT_OK){
+                if (data != null){
+                    final Uri uri = data.getData();
+                    Log.d(TAG, "Uri: " + uri.toString());
+
+                    FriendlyMessage tempMessage = new FriendlyMessage(null, mUsername,
+                            mPhotoUrl, LOADING_IMAGE_URL);
+                    mFirebaseDatabaseReference.child(MESSAGES_CHILD)
+                            .push().setValue(tempMessage, new DatabaseReference.CompletionListener() {
+                        @Override
+                        public void onComplete(@Nullable DatabaseError databaseError,
+                                               @NonNull DatabaseReference databaseReference) {
+                            if (databaseError == null){
+                                String key = databaseReference.getKey();
+                                StorageReference storageReference =
+                                        FirebaseStorage.getInstance()
+                                                .getReference(mFirebaseUser.getUid())
+                                        .child(key)
+                                        .child(uri.getLastPathSegment());
+                                putImageInStorage(storageReference, uri, key);
+                            }else {
+                                Log.w(TAG, "Unable to write message to database.",
+                                        databaseError.toException());
+                            }
+
+                        }
+
+                        private void putImageInStorage(final StorageReference storageReference, final Uri uri, final String key) {
+                            Log.i(TAG, "inside putImageInStorage method");
+                            storageReference.putFile(uri).addOnCompleteListener(MainActivity.this,
+                                    new OnCompleteListener<UploadTask.TaskSnapshot>() {
+                                @Override
+                                public void onComplete(@NonNull final Task<UploadTask.TaskSnapshot> task) {
+                                    if (task.isSuccessful()){
+                                        String downloadUrl = task.getResult().getMetadata().getPath().toString();
+                                        FriendlyMessage friendlyMessage = new FriendlyMessage(
+                                                null, mUsername, mPhotoUrl, downloadUrl );
+                                        mFirebaseDatabaseReference.child(MESSAGES_CHILD).child(key)
+                                                .setValue(friendlyMessage);
+                                       Log.i(TAG, "the download url of image is "+downloadUrl);
+
+
+
+                                    }else {
+                                        Log.w(TAG, "Image upload task was not successful.",
+                                                task.getException());
+                                    }
+
+                                }
+                            });
+                        }
+                    });
+
+                }
+            }
+        }
     }
 
     @Override
